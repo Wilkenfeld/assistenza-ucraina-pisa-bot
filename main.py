@@ -24,8 +24,8 @@ def ping(update: Update, ctx: CallbackContext) -> None:
 
 def start(update: Update, ctx: CallbackContext) -> None:
     menu_kbd = ReplyKeyboardMarkup([[KeyboardButton(v) for v in menu_voices]])
-    ctx.bot.send_message(text="Hi!\nWhat do you want to do?",
-                         chat_id=update.effective_chat.id, reply_markup=menu_kbd)
+    ctx.bot.send_message(text="Hi!\nChoose a command from the menu or type /help to continue.",
+                         chat_id=update.effective_chat.id)
 
 
 def start_register_user(update: Update, ctx: CallbackContext):
@@ -40,6 +40,8 @@ def start_register_user(update: Update, ctx: CallbackContext):
     data[user.id]["chat_id"] = message.chat_id
     data[user.id]["username"] = user.username
 
+    update.message.chat.send_message(
+        "Welcome in the registration!\nUse /cancel to quit in any moment.")
     update.message.chat.send_message("What's your name?")
 
     return NAME
@@ -80,7 +82,10 @@ def save_russian(update: Update, ctx: CallbackContext):
 
     update.callback_query.answer()
     data[update.effective_user.id]["russian"] = True if update.callback_query.data == "Yes" else False
-    update.callback_query.message.chat.send_message("What's your location?")
+    update.callback_query.message.chat.send_message(
+        "What's your location?", 
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Share location", request_location=True)]], resize_keyboard=True, one_time_keyboard=True)
+    )
 
     return POSITION
 
@@ -104,26 +109,44 @@ def handle_error(update: Update, ctx: CallbackContext):
     update.message.reply_markdown('Invalid text')
 
 
-def handle_messages(update: Update, ctx: CallbackContext) -> None:
-    if update.message in menu_voices:
-        if update.message.text == "Join us!":
-            register_user(update.effective_user, update.message)
-        elif update.message.text == "Add a new group":
-            register_group(update.effective_chat)
-        else:
-            pass
-
-
 def save_location(update: Update, ctx: CallbackContext):
     global data
 
-    data[update.effective_user.id]["position"] = f"{update.message.location.latitude}, {update.message.location.longitude}"
+    if update.message.location:
+        data[update.effective_user.id]["position"] = f"{update.message.location.latitude}, {update.message.location.longitude}"
+    else:
+        data[update.effective_user.id]["position"] = update.message.text
 
     update.message.chat.send_message(
         "Insert your skills (music, languages spoken, etc.).\nEverything counts!")
 
     return SKILLS
 
+
+def cancel_registration(update: Update, ctx: CallbackContext):
+    global data
+
+    del data[update.effective_user.id]
+    update.effective_chat.send_message(
+        'Registration canceled.\nFeel free to start again from the menu.')
+
+    return ConversationHandler.END
+
+
+def handle_timeout(update: Update, ctx: CallbackContext):
+    global data
+
+    del data[update.effective_user.id]
+    update.effective_chat.send_message(
+        'Registration canceled (due to timeout).\nFeel free to start again from the menu.')
+
+    return ConversationHandler.END
+
+def help_command(update: Update, ctx: CallbackContext): 
+
+    update.effective_chat.send_message('''Available commands:
+/register_volunteer - Register yourself as a volunteer
+/register-group - Register a new group''')
 
 if __name__ == "__main__":
 
@@ -136,30 +159,33 @@ if __name__ == "__main__":
 
     updater.dispatcher.add_handler(CommandHandler('ping', ping))
     updater.dispatcher.add_handler(CommandHandler('start', start))
+    updater.dispatcher.add_handler(CommandHandler('help', help_command))
+
     updater.dispatcher.add_handler(
         ConversationHandler(
             entry_points=[
                 MessageHandler(Filters.regex(
                     'Join us!'), start_register_user),
+                CommandHandler('register_volunteer', start_register_user),
                 MessageHandler(
                     Filters.regex('Add a new group'), start_register_group),
+                CommandHandler('register_user', start_register_user),
             ],
             # TODO: implement a dispatch approach to avoid code duplication
             states={
-                NAME: [MessageHandler(Filters.all, save_name)],
-                SURNAME: [MessageHandler(Filters.all, save_surname)],
+                NAME: [MessageHandler(Filters.text & ~Filters.command, save_name)],
+                SURNAME: [MessageHandler(Filters.text & ~Filters.command, save_surname)],
                 UKRANIAN: [CallbackQueryHandler(save_ukranian)],
                 RUSSIAN: [CallbackQueryHandler(save_russian)],
-                POSITION: [MessageHandler(Filters.location, save_location)],
-                SKILLS: [MessageHandler(Filters.all, save_skills)]
+                POSITION: [MessageHandler((Filters.location | Filters.text) & ~Filters.command, save_location)],
+                SKILLS: [MessageHandler(Filters.text & ~Filters.command, save_skills)],
+                ConversationHandler.TIMEOUT: [
+                    MessageHandler(Filters.all, handle_timeout)]
             },
-            fallbacks=[MessageHandler(Filters.text, handle_error)]
+            fallbacks=[CommandHandler('cancel', cancel_registration)],
+            conversation_timeout=float(3600)  # conversation ends after an hour
         )
     )
-    updater.dispatcher.add_handler(
-        MessageHandler(Filters.text, handle_messages))
-    updater.dispatcher.add_handler(
-        MessageHandler(Filters.location, save_location))
 
     updater.start_polling()
     updater.idle()
