@@ -97,7 +97,7 @@ def save_skills(update: Update, ctx: CallbackContext):
     update.message.chat.send_message(
         "Yay! You joined the team.\nFeel free to add or change any information from the menu!")
 
-    db_handler.save(list(data[update.effective_user.id].items()), "volunteers")
+    db_handler.save(data[update.effective_user.id], "volunteers")
     return ConversationHandler.END
 
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     settings = json.load(open('settings.json'))
     updater = Updater(settings['token'], use_context=True)
     _ = gettext.translation('bot', settings["localedir"], fallback=True)
-    db_handler = DB('./db/data.db')
+    db_handler = DB('bot', settings['db_passwd'], 'bot_data')
 
     updater.dispatcher.add_handler(CommandHandler('ping', ping))
     updater.dispatcher.add_handler(CommandHandler('start', start))
